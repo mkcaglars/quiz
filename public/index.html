@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quiz</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9D%93%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="who">
+      <span>Quiz</span>
+      <span class="pill hidden" id="who-name"></span>
+      <span class="pill hidden" id="who-ders"></span>
+    </div>
+    <div class="who">
+      <span class="pill hidden" id="overall"></span>
+      <span class="pill score hidden" id="score"></span>
+    </div>
+  </header>
+
+  <!-- İsim/ders URL'de yoksa -->
+  <section class="screen hidden" id="s-form">
+    <h1>Quize Katıl</h1>
+    <form class="card" id="join-form">
+      <div class="field"><label for="f-name">Adın Soyadın</label><input id="f-name" maxlength="40" required></div>
+      <div class="field"><label for="f-ders">Ders</label><input id="f-ders" maxlength="60" required></div>
+      <div class="error" id="form-error"></div>
+      <button class="btn primary" type="submit">Katıl</button>
+    </form>
+  </section>
+
+  <section class="screen" id="s-connecting">
+    <div class="spinner"></div>
+    <p>Bağlanılıyor…</p>
+  </section>
+
+  <section class="screen hidden" id="s-lobby">
+    <h1 id="lobby-title"></h1>
+    <div class="spinner"></div>
+    <p>Öğretmenin quizi başlatması bekleniyor…</p>
+    <div class="card">
+      <h2>Bu dersin quizleri</h2>
+      <ul class="quiz-list" id="quiz-list"></ul>
+    </div>
+  </section>
+
+  <section class="screen hidden" id="s-countdown">
+    <h1 id="cd-title"></h1>
+    <p id="cd-sub"></p>
+    <div class="big-number" id="cd-number">3</div>
+  </section>
+
+  <section class="screen q-screen hidden" id="s-question">
+    <div class="q-head">
+      <span class="pill" id="q-index"></span>
+      <div class="timer" id="q-timer">20</div>
+    </div>
+    <div class="timebar"><div id="q-bar"></div></div>
+    <div class="q-text" id="q-text"></div>
+    <div class="answers" id="answers"></div>
+  </section>
+
+  <section class="screen hidden" id="s-answered">
+    <div class="spinner"></div>
+    <h1>Cevabın alındı!</h1>
+    <p>Diğer öğrenciler bekleniyor…</p>
+  </section>
+
+  <section class="screen result hidden" id="s-reveal">
+    <div class="result-icon" id="r-icon"></div>
+    <h1 id="r-title"></h1>
+    <div class="points" id="r-points"></div>
+    <p id="r-rank"></p>
+    <div class="card"><h2>İlk 5</h2><ol class="leaderboard" id="r-top"></ol></div>
+  </section>
+
+  <section class="screen hidden" id="s-waiting">
+    <div class="spinner"></div>
+    <p id="wait-msg">Sonraki soru birazdan…</p>
+  </section>
+
+  <section class="screen hidden" id="s-ended">
+    <div class="podium" id="e-icon">🏆</div>
+    <h1 id="e-title">Quiz bitti!</h1>
+    <p id="e-reason"></p>
+    <div class="points" id="e-score"></div>
+    <p id="e-rank"></p>
+    <div class="card"><h2>Sıralama (ilk 5)</h2><ol class="leaderboard" id="e-top"></ol></div>
+    <button class="btn ghost" id="back-lobby">Bekleme salonuna dön</button>
+  </section>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/common.js"></script>
+  <script src="/student.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Öğretmen Paneli</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9D%93%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="teacher">
+  <header class="topbar">
+    <div class="who"><span>Öğretmen Paneli</span></div>
+    <div class="who">
+      <span class="pill" id="conn">Bağlanıyor…</span>
+      <button class="btn small ghost hidden" id="logout">Çıkış</button>
+    </div>
+  </header>
+
+  <section class="screen hidden" id="s-login" style="color:var(--text)">
+    <form class="card" id="login-form">
+      <h2>Öğretmen Girişi</h2>
+      <div class="field"><label for="password">Şifre</label><input type="password" id="password" autocomplete="current-password" required></div>
+      <div class="error" id="login-error"></div>
+      <button class="btn primary" type="submit">Giriş</button>
+    </form>
+  </section>
+
+  <main class="layout hidden" id="main">
+    <nav class="tabs">
+      <button class="tab active" data-tab="live">Canlı</button>
+      <button class="tab" data-tab="quizzes">Quizler</button>
+      <button class="tab" data-tab="results">Sonuçlar</button>
+    </nav>
+
+    <div id="tab-live">
+      <div id="sessions" style="display:flex;flex-direction:column;gap:16px"></div>
+      <div class="panel" style="margin-top:16px">
+        <h2>Bağlı öğrenciler</h2>
+        <div id="lobbies"></div>
+      </div>
+    </div>
+
+    <div id="tab-quizzes" class="hidden">
+      <div class="panel" id="quiz-list-panel">
+        <div class="row between"><h2>Quizler</h2><button class="btn green" id="new-quiz">+ Yeni quiz</button></div>
+        <div id="quiz-table"></div>
+      </div>
+      <div class="panel hidden" id="editor">
+        <h2 id="editor-title">Yeni quiz</h2>
+        <form id="quiz-form">
+          <div class="grid2">
+            <div class="field"><label for="q-title">Başlık</label><input id="q-title" maxlength="120" required></div>
+            <div class="field"><label for="q-ders">Ders</label><input id="q-ders" maxlength="60" list="ders-list" required><datalist id="ders-list"></datalist></div>
+            <div class="field"><label for="q-duration">Toplam süre sınırı (dakika, 0 = yok)</label><input id="q-duration" type="number" min="0" max="600" value="0"></div>
+          </div>
+          <p class="muted">Her soru kendi süresi dolunca otomatik kapanır; son soru bitince quiz otomatik biter. Toplam süre sınırı verilirse, o süre dolduğunda quiz nerede olursa olsun biter.</p>
+          <div id="questions"></div>
+          <div class="row between">
+            <button type="button" class="btn blue" id="add-question">+ Soru ekle</button>
+            <div class="row">
+              <button type="button" class="btn ghost" id="cancel-edit">Vazgeç</button>
+              <button type="submit" class="btn green">Kaydet</button>
+            </div>
+          </div>
+          <div class="error" id="editor-error"></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="tab-results" class="hidden">
+      <div class="panel">
+        <h2>Geçmiş sonuçlar</h2>
+        <div id="results"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/common.js"></script>
+  <script src="/teacher.js"></script>
+</body>
+</html>
