@@ -94,6 +94,8 @@
 
   socket.on('teacher:quizzes', (list) => { quizzes = list; renderQuizzes(); renderLive(); });
 
+  socket.on('teacher:error', (msg) => toast(msg));
+
   socket.on('teacher:ended', (record) => {
     results = [record, ...results.filter((r) => r.id !== record.id)];
     renderResults();

@@ -8,21 +8,40 @@ const path = require('path');
 const { io: connect } = require('socket.io-client');
 const { createApp, sanitizeQuiz } = require('../server');
 
+// TEST_DATABASE_URL verilirse testler PostgreSQL üzerinde, verilmezse JSON dosyalarıyla çalışır.
+// Dikkat: PostgreSQL modunda bu veritabanındaki quizzes/results tabloları silinir.
+const databaseUrl = process.env.TEST_DATABASE_URL || null;
+
 let server;
 let url;
 let dataDir;
 const sockets = [];
 
+async function resetDatabase() {
+  if (!databaseUrl) return;
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: databaseUrl });
+  await pool.query('DROP TABLE IF EXISTS quizzes, results');
+  await pool.end();
+}
+
+async function startServer() {
+  const s = createApp({ dataDir, databaseUrl, password: 'gizli', countdownMs: 50, revealMs: 100 });
+  await s.ready;
+  await new Promise((r) => s.httpServer.listen(0, r));
+  return s;
+}
+
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'quiz-test-'));
-  server = createApp({ dataDir, password: 'gizli', countdownMs: 50, revealMs: 100 });
-  await new Promise((r) => server.httpServer.listen(0, r));
+  await resetDatabase();
+  server = await startServer();
   url = `http://localhost:${server.httpServer.address().port}`;
 });
 
-after(() => {
+after(async () => {
   for (const s of sockets) s.close();
-  server.close();
+  await server.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -121,8 +140,13 @@ test('tam akış: başlat, cevapla, puanla, otomatik bitir', async () => {
   assert.strictEqual(record.players[0].name, 'Ali');
   assert.strictEqual(otherGotQuestion, false);
 
-  const stored = JSON.parse(fs.readFileSync(path.join(dataDir, 'results.json'), 'utf8'));
-  assert.strictEqual(stored[0].id, record.id);
+  // sonuç kalıcı kayda yazıldı mı (yazma arka planda yapılır)
+  let stored = [];
+  for (let i = 0; i < 20 && !stored.some((r) => r.id === record.id); i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    stored = await server.storage.listResults(10);
+  }
+  assert.ok(stored.some((r) => r.id === record.id));
 });
 
 test('öğretmen quizi erken bitirebilir; geç gelen öğrenci devam eden soruya katılır', async () => {
@@ -159,4 +183,36 @@ test('toplam süre dolunca quiz otomatik biter', async () => {
   await emit(t, 'teacher:start', { quizId: saved.quiz.id });
   const ended = await endedP;
   assert.strictEqual(ended.reason, 'time');
+});
+
+test('quizler ve sonuçlar sunucu yeniden başlayınca kaybolmaz', async () => {
+  const { t } = await teacher();
+  const saved = await emit(t, 'teacher:saveQuiz', {
+    title: 'Kalıcı', ders: 'Edebiyat', questions: [{ text: 'Soru?', options: ['A', 'B'], correct: 0, time: 30 }],
+  });
+  assert.ok(saved.ok);
+  const before = (await emit(t, 'teacher:results')).results.length;
+  assert.ok(before >= 1);
+
+  // ikinci bir sunucu aynı kayıt yerine bağlanır (yeniden başlatma gibi)
+  const second = await startServer();
+  try {
+    const t2 = connect(`http://localhost:${second.httpServer.address().port}`, { transports: ['websocket'], forceNew: true });
+    sockets.push(t2);
+    const res = await emit(t2, 'teacher:login', { password: 'gizli' });
+    assert.ok(res.ok);
+    assert.ok(res.quizzes.some((q) => q.id === saved.quiz.id && q.title === 'Kalıcı'));
+    assert.ok(res.quizzes.some((q) => q.title === 'Örnek Matematik Quizi'), 'örnek quiz bir kez eklenmeli');
+    assert.strictEqual(res.quizzes.filter((q) => q.title === 'Örnek Matematik Quizi').length, 1);
+    assert.strictEqual(res.results.length, before);
+
+    const del = await emit(t2, 'teacher:deleteResult', { id: res.results[0].id });
+    assert.ok(del.ok);
+    assert.strictEqual(del.results.length, before - 1);
+    assert.ok((await emit(t2, 'teacher:deleteQuiz', { id: saved.quiz.id })).ok);
+  } finally {
+    await second.close();
+  }
+  const after = await server.storage.loadQuizzes();
+  if (databaseUrl) assert.ok(!after.some((q) => q.id === saved.quiz.id), 'silinen quiz veritabanından da gitmeli');
 });

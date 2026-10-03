@@ -34,12 +34,26 @@ TEACHER_PASSWORD=gizliSifre npm start     # varsayılan port 3000 (PORT ile değ
 Puanlama Kahoot gibidir: doğru cevap hıza göre 500–1000 puan, yanlış veya boş 0 puan.
 Geç bağlanan ya da bağlantısı kopup geri gelen öğrenci devam eden soruya kaldığı yerden katılır (aynı isim = aynı oyuncu). Her derste aynı anda tek quiz çalışabilir; farklı dersler paralel çalışabilir.
 
-## Veri
+## Veri ve veritabanı
 
-Quizler ve sonuçlar `data/quizzes.json` ve `data/results.json` dosyalarında tutulur (ilk çalıştırmada örnek bir Matematik quizi eklenir). Aktif quiz durumu bellektedir; sunucu yeniden başlarsa devam eden quiz kaybolur.
+Quizler ve biten quizlerin sonuçları kalıcı olarak saklanır. Sonuçları sadece öğretmen (şifreyle) görür.
+
+- **`DATABASE_URL` tanımlıysa** kayıtlar PostgreSQL'e yazılır. Tablolar ilk açılışta otomatik oluşturulur. `data/` klasöründe eski JSON kayıtları varsa veritabanı boşken bir kez içeri aktarılır.
+- **Tanımlı değilse** kayıtlar `data/quizzes.json` ve `data/results.json` dosyalarına yazılır (yerel deneme için).
+
+İlk çalıştırmada örnek bir Matematik quizi eklenir. Devam eden quizin anlık durumu bellektedir; sunucu ders sırasında yeniden başlarsa o quiz yarıda kalır, ama kayıtlı quizler ve sonuçlar silinmez.
+
+### Render + Neon ile yayınlama
+
+1. https://neon.tech adresinde ücretsiz hesap açıp bir proje oluşturun (bölge: Frankfurt) ve bağlantı adresini kopyalayın (`postgresql://...neon.tech/neondb?sslmode=require`).
+2. https://render.com adresinde **New → Web Service** ile bu repoyu seçin. Build: `npm install`, Start: `npm start`, plan: Free.
+3. **Environment** bölümüne iki değişken ekleyin: `TEACHER_PASSWORD` (öğretmen şifresi) ve `DATABASE_URL` (Neon adresi).
+
+Ücretsiz Render sunucusu 15 dakika kullanılmazsa uyur; ilk açılış 30–60 sn sürer. Dersten önce öğretmen panelini açmanız yeterli.
 
 ## Test
 
 ```bash
-npm test
+npm test                                                        # JSON dosya modu
+TEST_DATABASE_URL=postgresql://kullanici@localhost/quiztest npm test   # PostgreSQL modu (tabloları siler!)
 ```

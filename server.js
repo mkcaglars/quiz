@@ -1,11 +1,11 @@
 'use strict';
 
 const path = require('path');
-const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
+const { createStorage } = require('./storage');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -14,20 +14,6 @@ const { Server } = require('socket.io');
 const normalize = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
 const clean = (s, max = 60) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, max);
 const newId = () => crypto.randomBytes(6).toString('hex');
-
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, file);
-}
 
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
@@ -84,20 +70,15 @@ function createApp(opts = {}) {
   const countdownMs = opts.countdownMs ?? 3000; // quiz başlamadan önceki geri sayım
   const revealMs = opts.revealMs ?? 5000; // cevap gösterildikten sonra sonraki soruya geçiş
 
-  fs.mkdirSync(dataDir, { recursive: true });
-  const quizzesFile = path.join(dataDir, 'quizzes.json');
-  const resultsFile = path.join(dataDir, 'results.json');
+  const databaseUrl = opts.databaseUrl !== undefined ? opts.databaseUrl : process.env.DATABASE_URL;
+  const storage = createStorage({ databaseUrl, dataDir });
 
-  let quizzes = readJson(quizzesFile, null);
-  if (!Array.isArray(quizzes)) {
-    quizzes = [{ id: newId(), createdAt: Date.now(), ...SAMPLE_QUIZ }];
-    writeJson(quizzesFile, quizzes);
-  }
-  let results = readJson(resultsFile, []);
-  if (!Array.isArray(results)) results = [];
-
-  const saveQuizzes = () => writeJson(quizzesFile, quizzes);
-  const saveResults = () => writeJson(resultsFile, results);
+  // Quizler bellekte de tutulur (hızlı erişim için); her değişiklik önce kalıcı kayda yazılır.
+  let quizzes = [];
+  const ready = storage
+    .init([{ id: newId(), createdAt: Date.now(), ...SAMPLE_QUIZ }])
+    .then(() => storage.loadQuizzes())
+    .then((list) => { quizzes = list; });
 
   const app = express();
   app.use(express.static(path.join(__dirname, 'public')));
@@ -326,9 +307,10 @@ function createApp(opts = {}) {
         return { ...b, answers: p ? p.answers : [] };
       }),
     };
-    results.unshift(record);
-    if (results.length > 500) results.length = 500;
-    saveResults();
+    storage.addResult(record).catch((err) => {
+      console.error('Sonuç kaydedilemedi:', err);
+      io.to('teachers').emit('teacher:error', `"${record.title}" sonucu kaydedilemedi: ${err.message}`);
+    });
 
     for (const p of session.players.values()) {
       const rank = board.findIndex((b) => b.name === p.name) + 1;
@@ -447,14 +429,20 @@ function createApp(opts = {}) {
       if (connected.length > 0 && connected.every(([k]) => session.answers.has(k))) reveal(session);
     });
 
-    socket.on('teacher:login', (payload, ack) => {
+    socket.on('teacher:login', async (payload, ack) => {
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!safeEqual((payload && payload.password) || '', password)) {
         return reply({ ok: false, error: 'Şifre hatalı.' });
       }
       socket.data = { role: 'teacher' };
       socket.join('teachers');
-      reply({ ok: true, quizzes, results: results.slice(0, 100) });
+      let results = [];
+      try {
+        results = await storage.listResults(100);
+      } catch (err) {
+        console.error('Sonuçlar okunamadı:', err);
+      }
+      reply({ ok: true, quizzes, results });
       pushTeacherState();
     });
 
@@ -463,11 +451,9 @@ function createApp(opts = {}) {
       socket.on(event, (payload, ack) => {
         const reply = typeof ack === 'function' ? ack : () => {};
         if (socket.data.role !== 'teacher') return reply({ ok: false, error: 'Yetkisiz.' });
-        try {
-          handler(payload || {}, reply);
-        } catch (err) {
-          reply({ ok: false, error: err.message || 'Hata oluştu.' });
-        }
+        Promise.resolve()
+          .then(() => handler(payload || {}, reply))
+          .catch((err) => reply({ ok: false, error: err.message || 'Hata oluştu.' }));
       });
     };
 
@@ -476,30 +462,31 @@ function createApp(opts = {}) {
       for (const d of new Set(affectedDers.map(normalize))) pushQuizList(d);
     };
 
-    teacherOnly('teacher:saveQuiz', (payload, reply) => {
+    teacherOnly('teacher:saveQuiz', async (payload, reply) => {
       const data = sanitizeQuiz(payload);
       let quiz;
       const affected = [data.ders];
       if (payload.id) {
-        const idx = quizzes.findIndex((q) => q.id === payload.id);
-        if (idx === -1) throw new Error('Quiz bulunamadı.');
-        affected.push(quizzes[idx].ders);
-        quiz = { ...quizzes[idx], ...data, updatedAt: Date.now() };
-        quizzes[idx] = quiz;
+        const old = quizzes.find((q) => q.id === payload.id);
+        if (!old) throw new Error('Quiz bulunamadı.');
+        affected.push(old.ders);
+        quiz = { ...old, ...data, updatedAt: Date.now() };
       } else {
         quiz = { id: newId(), createdAt: Date.now(), ...data };
-        quizzes.push(quiz);
       }
-      saveQuizzes();
+      await storage.saveQuiz(quiz);
+      const idx = quizzes.findIndex((q) => q.id === quiz.id);
+      if (idx === -1) quizzes.push(quiz);
+      else quizzes[idx] = quiz;
       broadcastQuizzes(affected);
       reply({ ok: true, quiz });
     });
 
-    teacherOnly('teacher:deleteQuiz', ({ id }, reply) => {
-      const idx = quizzes.findIndex((q) => q.id === id);
-      if (idx === -1) throw new Error('Quiz bulunamadı.');
-      const [removed] = quizzes.splice(idx, 1);
-      saveQuizzes();
+    teacherOnly('teacher:deleteQuiz', async ({ id }, reply) => {
+      const removed = quizzes.find((q) => q.id === id);
+      if (!removed) throw new Error('Quiz bulunamadı.');
+      await storage.deleteQuiz(id);
+      quizzes = quizzes.filter((q) => q.id !== id);
       broadcastQuizzes([removed.ders]);
       reply({ ok: true });
     });
@@ -531,14 +518,13 @@ function createApp(opts = {}) {
       reply({ ok: true });
     });
 
-    teacherOnly('teacher:results', (payload, reply) => {
-      reply({ ok: true, results: results.slice(0, 100) });
+    teacherOnly('teacher:results', async (payload, reply) => {
+      reply({ ok: true, results: await storage.listResults(100) });
     });
 
-    teacherOnly('teacher:deleteResult', ({ id }, reply) => {
-      results = results.filter((r) => r.id !== id);
-      saveResults();
-      reply({ ok: true, results: results.slice(0, 100) });
+    teacherOnly('teacher:deleteResult', async ({ id }, reply) => {
+      await storage.deleteResult(id);
+      reply({ ok: true, results: await storage.listResults(100) });
     });
 
     socket.on('disconnect', () => {
@@ -558,26 +544,31 @@ function createApp(opts = {}) {
     });
   });
 
-  function close() {
+  async function close() {
     for (const s of sessions.values()) {
       clearPhaseTimer(s);
       if (s.overallTimer) clearTimeout(s.overallTimer);
     }
     io.close();
     httpServer.close();
+    await storage.close();
   }
 
-  return { app, httpServer, io, close };
+  return { app, httpServer, io, ready, storage, close };
 }
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
-  const { httpServer } = createApp();
-  httpServer.listen(port, () => {
+  const { httpServer, ready, storage } = createApp();
+  ready.then(() => httpServer.listen(port, () => {
     console.log(`Quiz sunucusu çalışıyor: http://localhost:${port}`);
+    console.log(`Kayıt yeri:             ${storage.kind === 'postgres' ? 'PostgreSQL (DATABASE_URL)' : 'data/ klasöründeki JSON dosyaları'}`);
     console.log(`Öğretmen paneli:        http://localhost:${port}/ogretmen`);
     console.log(`Öğrenci bağlantısı:     http://localhost:${port}/?isim=Ali&ders=Matematik`);
     if (!process.env.TEACHER_PASSWORD) console.log('Uyarı: TEACHER_PASSWORD ayarlanmadı, varsayılan şifre "ogretmen123".');
+  })).catch((err) => {
+    console.error('Kayıt sistemi başlatılamadı (DATABASE_URL doğru mu?):', err.message);
+    process.exit(1);
   });
 }
 
