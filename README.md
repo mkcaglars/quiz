@@ -44,6 +44,7 @@ Yüklemeden önce önizleme gösterilir; hatalı satırlar satır numarasıyla l
 2. Doğru cevap ve sıralama 5 sn gösterilir, ardından sonraki soruya otomatik geçilir.
 3. Son soru bitince quiz otomatik biter. Toplam süre sınırı verildiyse süre dolduğunda quiz nerede olursa olsun biter.
 4. Öğretmen her an "Bitir" ile sonlandırabilir.
+5. Quiz bitince öğretmen ekranında skor tablosu açılır: ilk 3 öğrenci altın, gümüş ve bronz madalyalı kürsüde, diğerleri altta sıralı. Tablo öğretmen **Kapat** diyene kadar (sayfa yenilense bile) ekranda kalır; **Tam ekran** ile tahtaya yansıtılabilir. *Sonuçlar* sekmesinden tekrar açılabilir.
 
 Puanlama Kahoot gibidir: doğru cevap hıza göre 500–1000 puan, yanlış veya boş 0 puan.
 Geç bağlanan ya da bağlantısı kopup geri gelen öğrenci devam eden soruya kaldığı yerden katılır (aynı isim = aynı oyuncu). Her derste aynı anda tek quiz çalışabilir; farklı dersler paralel çalışabilir.

@@ -35,6 +35,7 @@
       $('#logout').classList.remove('hidden');
       renderQuizzes();
       renderResults();
+      renderScoreboards();
     });
   }
 
@@ -103,8 +104,73 @@
   socket.on('teacher:ended', (record) => {
     results = [record, ...results.filter((r) => r.id !== record.id)];
     renderResults();
-    toast(`"${record.title}" bitti. ${REASONS[record.reason] || ''}`);
+    openScoreboard(record);
   });
+
+  // ------------------------------------------------------------------ skor tablosu
+  // Quiz bitince skor tablosu öğretmen "Kapat" diyene kadar ekranda kalır (sayfa yenilense bile).
+
+  let boards = [];
+  try { boards = JSON.parse(sessionStorage.getItem('scoreboards') || '[]'); } catch { boards = []; }
+  const saveBoards = () => {
+    try { sessionStorage.setItem('scoreboards', JSON.stringify(boards)); } catch { /* depolama kapalı olabilir */ }
+  };
+
+  function openScoreboard(record) {
+    boards = [record, ...boards.filter((b) => b.id !== record.id)];
+    saveBoards();
+    document.querySelector('.tab[data-tab="live"]').click();
+    renderScoreboards();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeScoreboard(id) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    boards = boards.filter((b) => b.id !== id);
+    saveBoards();
+    renderScoreboards();
+  }
+
+  const MEDALS = ['🥇', '🥈', '🥉'];
+
+  function renderScoreboards() {
+    const box = $('#scoreboards');
+    box.replaceChildren(...boards.map((r) => {
+      const total = r.questions.length;
+      const players = r.players;
+      // Kürsü sırası: 2. solda, 1. ortada, 3. sağda
+      const podium = [1, 0, 2].filter((i) => players[i]).map((i) => {
+        const p = players[i];
+        return el('div', { class: `podium-place place-${i + 1}` },
+          el('div', { class: 'medal' }, MEDALS[i]),
+          el('div', { class: 'podium-name' }, p.name),
+          el('div', { class: 'podium-score' }, `${p.score} puan`),
+          el('div', { class: 'podium-correct' }, `${p.correct}/${total} doğru`),
+          el('div', { class: 'podium-block' }, i + 1));
+      });
+      const rest = players.slice(3);
+      const node = el('div', { class: 'panel scoreboard' },
+        el('div', { class: 'row between' },
+          el('div', {},
+            el('h2', { style: 'margin:0' }, `🏆 ${r.title}`),
+            el('div', { class: 'muted' }, `${r.ders} · ${players.length} öğrenci · ${REASONS[r.reason] || ''}`)),
+          el('div', { class: 'row' },
+            el('button', {
+              class: 'btn small ghost fs-btn',
+              onclick: () => (document.fullscreenElement ? document.exitFullscreen() : node.requestFullscreen()).catch(() => {}),
+            }, '⛶ Tam ekran'),
+            el('button', { class: 'btn small red', onclick: () => closeScoreboard(r.id) }, 'Kapat ✕'))),
+        players.length
+          ? el('div', { class: 'podium-row' }, podium)
+          : el('p', { class: 'muted', style: 'text-align:center;padding:24px' }, 'Bu quize katılan öğrenci olmadı.'),
+        rest.length
+          ? el('ol', { class: 'leaderboard rest', start: 4 }, rest.map((p, i) => el('li', {},
+            el('span', {}, el('span', { class: 'rank' }, `${i + 4}.`), p.name),
+            el('span', {}, `${p.score} puan · ${p.correct}/${total} doğru`))))
+          : null);
+      return node;
+    }));
+  }
 
   const activeByDers = () => new Map(live.sessions.map((s) => [norm(s.ders), s]));
 
@@ -445,6 +511,7 @@
             el('div', { class: 'muted' }, `${new Date(r.startedAt).toLocaleString('tr-TR')} · ${r.players.length} öğrenci · ${REASONS[r.reason] || ''}`)),
           el('div', { class: 'row' },
             el('button', { class: 'btn small ghost', onclick: () => { open ? openResults.delete(r.id) : openResults.add(r.id); renderResults(); } }, open ? 'Gizle' : 'Detay'),
+            el('button', { class: 'btn small ghost', onclick: () => openScoreboard(r) }, '🏆 Skor tablosu'),
             el('button', { class: 'btn small blue', onclick: () => download(r) }, 'CSV indir'),
             el('button', {
               class: 'btn small red',

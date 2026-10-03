@@ -199,3 +199,32 @@ th { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spa
 .import-box { margin-top: 16px; border-top: 1px solid #e5e5ea; padding-top: 12px; }
 .import-errors { margin: 8px 0; padding: 10px 12px 10px 28px; background: #fdecee; color: #9b1026; border-radius: 6px; line-height: 1.5; }
 .badge.update { background: var(--yellow); color: #fff; }
+
+/* ---------- Skor tablosu (quiz sonu) ---------- */
+.scoreboard { border: 3px solid var(--bg); }
+.scoreboard:fullscreen { overflow: auto; padding: 32px; border: 0; border-radius: 0; background: var(--bg); color: #fff; }
+.scoreboard:fullscreen .muted { color: rgba(255,255,255,.75); }
+.scoreboard:fullscreen .leaderboard li { background: rgba(255,255,255,.12); color: #fff; }
+.scoreboard:fullscreen .leaderboard .rank { color: rgba(255,255,255,.7); }
+.scoreboard:fullscreen .podium-name, .scoreboard:fullscreen .podium-score { color: #fff; }
+.scoreboard:fullscreen .podium-correct { color: rgba(255,255,255,.75); }
+.podium-row { display: flex; justify-content: center; align-items: flex-end; gap: 12px; margin: 24px 0 16px; }
+.podium-place { display: flex; flex-direction: column; align-items: center; width: min(220px, 31%); text-align: center; animation: rise .6s ease both; }
+.place-1 { animation-delay: .6s; }
+.place-2 { animation-delay: .3s; }
+.place-3 { animation-delay: 0s; }
+@keyframes rise { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.medal { font-size: clamp(40px, 7vw, 64px); line-height: 1.1; }
+.place-1 .medal { font-size: clamp(52px, 9vw, 84px); }
+.podium-name { font-weight: 800; font-size: clamp(15px, 2.2vw, 22px); word-break: break-word; margin-top: 4px; }
+.podium-score { font-weight: 800; color: var(--bg); margin-top: 2px; }
+.podium-correct { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.podium-block {
+  width: 100%; border-radius: 8px 8px 0 0; color: #fff; font-weight: 900; font-size: clamp(28px, 5vw, 48px);
+  display: grid; place-items: center; box-shadow: inset 0 -6px 0 rgba(0,0,0,.15);
+}
+.place-1 .podium-block { height: 170px; background: linear-gradient(#f7d046, #d4a20b); }
+.place-2 .podium-block { height: 125px; background: linear-gradient(#d9dde3, #9aa3ad); }
+.place-3 .podium-block { height: 95px; background: linear-gradient(#e3a46c, #b06a2c); }
+.leaderboard.rest { max-width: 720px; margin: 0 auto; }
+@media (max-width: 560px) { .place-1 .podium-block { height: 120px; } .place-2 .podium-block { height: 90px; } .place-3 .podium-block { height: 70px; } }
