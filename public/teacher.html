@@ -41,9 +41,33 @@
     </div>
 
     <div id="tab-quizzes" class="hidden">
-      <div class="panel" id="quiz-list-panel">
-        <div class="row between"><h2>Quizler</h2><button class="btn green" id="new-quiz">+ Yeni quiz</button></div>
-        <div id="quiz-table"></div>
+      <div id="quiz-home" style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel" id="upload-panel">
+          <h2>Quiz yükle</h2>
+          <p class="muted" style="margin-top:0">Şablonu indirin, Excel'de doldurun ve buraya yükleyin. Bir dosyada birden fazla quiz olabilir. Aynı ders ve başlıkta quiz zaten varsa güncellenir.</p>
+          <div class="row">
+            <a class="btn blue" href="/sablon.csv" download="quiz-sablonu.csv">⬇ Şablonu indir</a>
+            <label class="btn green" style="margin:0">⬆ Dosya seç<input type="file" id="import-file" accept=".csv,.json,.txt,text/csv,application/json" hidden></label>
+            <span class="muted">veya dosyayı bu kutuya sürükleyin</span>
+          </div>
+          <details style="margin-top:12px">
+            <summary><strong>Şablon nasıl doldurulur?</strong></summary>
+            <ul class="help">
+              <li>Her satır bir sorudur. <strong>Ders</strong> ve <strong>Quiz Başlığı</strong> aynı olan satırlar aynı quizin soruları olur. Boş bırakırsanız üstteki satırınki kullanılır.</li>
+              <li><strong>Seçenek A</strong> ve <strong>B</strong> zorunludur; C ve D isteğe bağlıdır (doğru/yanlış sorusu için C ve D'yi boş bırakın).</li>
+              <li><strong>Doğru Cevap</strong> sütununa A, B, C veya D yazın.</li>
+              <li><strong>Süre (sn)</strong> sorunun süresidir (5–300). Boşsa 20 saniye olur.</li>
+              <li><strong>Toplam Süre (dk)</strong> isteğe bağlıdır; quizin herhangi bir satırına yazmanız yeterli. 0 veya boş = sınır yok.</li>
+              <li>Excel'de kaydederken <em>Dosya → Farklı Kaydet → "CSV UTF-8 (Virgülle ayrılmış)"</em> seçin. Normal "CSV" de çalışır.</li>
+              <li>İlk satırdaki (başlık) sütun adlarını silmeyin veya değiştirmeyin.</li>
+            </ul>
+          </details>
+          <div id="import-preview"></div>
+        </div>
+        <div class="panel" id="quiz-list-panel">
+          <div class="row between"><h2>Quizler</h2><button class="btn green" id="new-quiz">+ Yeni quiz</button></div>
+          <div id="quiz-table"></div>
+        </div>
       </div>
       <div class="panel hidden" id="editor">
         <h2 id="editor-title">Yeni quiz</h2>

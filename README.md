@@ -25,6 +25,20 @@ TEACHER_PASSWORD=gizliSifre npm start     # varsayılan port 3000 (PORT ile değ
 - *Canlı* sekmesi: hangi derste hangi öğrencilerin bağlı olduğunu görür ve o dersin quizini **başlatır**. Başlatınca o dersteki tüm öğrencilerde quiz **aynı anda** açılır (3 sn geri sayım). Canlı ekranda soru, kalan süre, seçenek dağılımı, kaç kişinin cevapladığı ve sıralama görünür. "Cevabı göster / Sonraki" ile akışı hızlandırabilir, **Bitir** ile quizi istediği an sonlandırabilir.
 - *Sonuçlar* sekmesi: biten quizlerin öğrenci bazlı detayları ve CSV (Excel uyumlu) indirme.
 
+**Quiz yükleme (Excel/CSV):** *Quizler* sekmesindeki **Quiz yükle** bölümünden şablon indirilir ([`public/sablon.csv`](public/sablon.csv)), Excel'de doldurulup geri yüklenir. Her satır bir sorudur; aynı Ders + Quiz Başlığı'na sahip satırlar tek quiz olur, böylece bir dosyada birden fazla quiz olabilir.
+
+| Sütun | Açıklama |
+|---|---|
+| Ders | Öğrenci bağlantısındaki `ders` ile aynı olmalı. Boşsa üstteki satırınki kullanılır. |
+| Quiz Başlığı | Boşsa üstteki satırınki kullanılır. |
+| Soru | Soru metni |
+| Seçenek A–D | A ve B zorunlu, C ve D isteğe bağlı |
+| Doğru Cevap | A, B, C veya D |
+| Süre (sn) | 5–300, boşsa 20 |
+| Toplam Süre (dk) | İsteğe bağlı quiz süre sınırı (0/boş = yok) |
+
+Yüklemeden önce önizleme gösterilir; hatalı satırlar satır numarasıyla listelenir ve düzeltilmeden içe aktarılmaz. Aynı ders ve başlıkta quiz varsa güncellenir, yoksa yeni eklenir. Her quizin yanındaki **İndir** düğmesi quizi aynı şablon biçiminde verir; düzenleyip tekrar yükleyebilirsiniz. UTF-8 ve Türkçe Windows (Excel'in normal "CSV") kodlamaları, `;` `,` ve sekme ayraçları desteklenir; JSON dosyaları da yüklenebilir.
+
 **Akış ve otomatik bitiş**
 1. Her soru kendi süresi dolunca kapanır (bağlı herkes cevapladıysa beklemeden kapanır).
 2. Doğru cevap ve sıralama 5 sn gösterilir, ardından sonraki soruya otomatik geçilir.

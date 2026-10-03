@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
+const { parseQuizFile } = require('./importer');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -480,6 +481,48 @@ function createApp(opts = {}) {
       else quizzes[idx] = quiz;
       broadcastQuizzes(affected);
       reply({ ok: true, quiz });
+    });
+
+    // Dosyadan quiz yükleme. apply=false ise sadece önizleme döner, hiçbir şey kaydedilmez.
+    // Aynı ders + başlıkta quiz varsa güncellenir, yoksa yeni quiz eklenir.
+    teacherOnly('teacher:importQuizzes', async ({ text, filename, apply }, reply) => {
+      if (typeof text !== 'string') throw new Error('Dosya okunamadı.');
+      const parsed = parseQuizFile(text, filename);
+      const errors = [...parsed.errors];
+      const items = [];
+      parsed.quizzes.forEach((raw, i) => {
+        try {
+          const data = sanitizeQuiz(raw);
+          const existing = quizzes.find((q) => normalize(q.ders) === normalize(data.ders) && normalize(q.title) === normalize(data.title));
+          items.push({ data, existing });
+        } catch (err) {
+          errors.push(`${raw.title ? `"${raw.title}"` : `${i + 1}. quiz`}: ${err.message}`);
+        }
+      });
+      const preview = items.map(({ data, existing }) => ({
+        title: data.title,
+        ders: data.ders,
+        questionCount: data.questions.length,
+        durationMin: data.durationMin,
+        action: existing ? 'update' : 'new',
+      }));
+      if (!apply) return reply({ ok: true, preview, errors });
+      if (errors.length) throw new Error('Dosyada hatalar var; önce düzeltin.');
+      if (!items.length) throw new Error('Dosyada quiz bulunamadı.');
+
+      const affected = [];
+      for (const { data, existing } of items) {
+        const quiz = existing
+          ? { ...existing, ...data, updatedAt: Date.now() }
+          : { id: newId(), createdAt: Date.now(), ...data };
+        await storage.saveQuiz(quiz);
+        const idx = quizzes.findIndex((q) => q.id === quiz.id);
+        if (idx === -1) quizzes.push(quiz);
+        else quizzes[idx] = quiz;
+        affected.push(quiz.ders);
+      }
+      broadcastQuizzes(affected);
+      reply({ ok: true, preview, errors: [] });
     });
 
     teacherOnly('teacher:deleteQuiz', async ({ id }, reply) => {

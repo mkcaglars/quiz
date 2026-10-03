@@ -3,6 +3,10 @@
 
   const STATE_LABEL = { countdown: 'Başlıyor', question: 'Soru açık', reveal: 'Cevap gösteriliyor', ended: 'Bitti' };
   const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
+  // Bazı tarayıcılar Türkçe karakterli indirme adlarını yok sayıp "download" der; dosya adını sadeleştir
+  const TR = { ç: 'c', Ç: 'C', ğ: 'g', Ğ: 'G', ı: 'i', İ: 'I', ö: 'o', Ö: 'O', ş: 's', Ş: 'S', ü: 'u', Ü: 'U' };
+  const fileName = (...parts) => parts.join('-').replace(/[çÇğĞıİöÖşŞüÜ]/g, (c) => TR[c])
+    .replace(/[^A-Za-z0-9 ._-]+/g, '').replace(/\s+/g, ' ').trim() + '.csv';
 
   const socket = io();
   let quizzes = [];
@@ -219,6 +223,7 @@
               ? el('span', { class: 'badge open' }, 'Canlı')
               : el('button', { class: 'btn small green', disabled: !!running, title: running ? 'Bu derste başka bir quiz devam ediyor' : '', onclick: () => startQuiz(q) }, '▶ Başlat'),
             el('button', { class: 'btn small ghost', onclick: () => openEditor(q) }, 'Düzenle'),
+            el('button', { class: 'btn small ghost', title: 'Şablon biçiminde indir (Excel)', onclick: () => exportQuiz(q) }, 'İndir'),
             el('button', { class: 'btn small ghost', onclick: () => openEditor({ ...q, id: null, title: q.title + ' (kopya)' }) }, 'Kopyala'),
             el('button', {
               class: 'btn small red',
@@ -263,14 +268,14 @@
     box.replaceChildren();
     const qs = q.questions.length ? q.questions : [{ text: '', options: ['', '', '', ''], correct: 0, time: 20 }];
     qs.forEach((item, i) => box.append(questionEditor(item, i)));
-    $('#quiz-list-panel').classList.add('hidden');
+    $('#quiz-home').classList.add('hidden');
     $('#editor').classList.remove('hidden');
     $('#q-title').focus();
   }
 
   function closeEditor() {
     $('#editor').classList.add('hidden');
-    $('#quiz-list-panel').classList.remove('hidden');
+    $('#quiz-home').classList.remove('hidden');
   }
 
   $('#new-quiz').addEventListener('click', () => openEditor(null));
@@ -312,6 +317,99 @@
     });
   });
 
+  // ------------------------------------------------------------------ quiz yükleme
+
+  const csvCell = (v) => {
+    const t = String(v == null ? '' : v);
+    return /[;"\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+
+  function saveCsv(rows, filename) {
+    const text = '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n';
+    const a = el('a', { href: URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })), download: filename });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  // Quizi yükleme şablonuyla aynı biçimde indirir; düzenleyip tekrar yüklenebilir
+  function exportQuiz(q) {
+    const header = ['Ders', 'Quiz Başlığı', 'Soru', 'Seçenek A', 'Seçenek B', 'Seçenek C', 'Seçenek D', 'Doğru Cevap', 'Süre (sn)', 'Toplam Süre (dk)'];
+    const rows = q.questions.map((item, i) => [
+      q.ders, q.title, item.text, ...[0, 1, 2, 3].map((k) => item.options[k] || ''),
+      'ABCD'[item.correct], item.time, i === 0 ? q.durationMin || 0 : '',
+    ]);
+    saveCsv([header, ...rows], fileName(q.ders, q.title));
+  }
+
+  // Excel bazen dosyayı Türkçe Windows kodlamasıyla (1254) kaydeder; UTF-8 değilse ona düş
+  async function readFileText(file) {
+    const buf = await file.arrayBuffer();
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    } catch {
+      return new TextDecoder('windows-1254').decode(buf);
+    }
+  }
+
+  let pendingImport = null;
+
+  async function handleImportFile(file) {
+    if (!file) return;
+    const box = $('#import-preview');
+    if (file.size > 900 * 1024) { toast('Dosya çok büyük (en fazla 900 KB).'); return; }
+    const text = await readFileText(file);
+    const res = await call('teacher:importQuizzes', { text, filename: file.name, apply: false });
+    if (!res.ok) return;
+    pendingImport = { text, filename: file.name };
+    const canImport = res.preview.length > 0 && res.errors.length === 0;
+    box.replaceChildren(el('div', { class: 'import-box' },
+      el('h3', {}, `"${file.name}" önizlemesi`),
+      res.preview.length
+        ? el('table', {},
+          el('thead', {}, el('tr', {}, el('th', {}, 'Ders'), el('th', {}, 'Başlık'), el('th', {}, 'Soru'), el('th', {}, 'İşlem'))),
+          el('tbody', {}, res.preview.map((p) => el('tr', {},
+            el('td', {}, p.ders),
+            el('td', {}, p.title, p.durationMin ? el('div', { class: 'muted' }, `Süre sınırı: ${p.durationMin} dk`) : null),
+            el('td', {}, p.questionCount),
+            el('td', {}, el('span', { class: 'badge ' + (p.action === 'update' ? 'update' : 'open') }, p.action === 'update' ? 'Güncellenecek' : 'Yeni'))))))
+        : el('p', { class: 'muted' }, 'Dosyada geçerli quiz bulunamadı.'),
+      res.errors.length
+        ? el('div', {}, el('strong', { style: 'color:var(--red)' }, `${res.errors.length} hata bulundu. Dosyayı düzeltip tekrar yükleyin:`),
+          el('ul', { class: 'import-errors' }, res.errors.slice(0, 30).map((e) => el('li', {}, e))),
+          res.errors.length > 30 ? el('p', { class: 'muted' }, `…ve ${res.errors.length - 30} hata daha`) : null)
+        : null,
+      el('div', { class: 'row', style: 'margin-top:12px' },
+        el('button', { class: 'btn green', disabled: !canImport, onclick: applyImport },
+          canImport ? `İçe aktar (${res.preview.length} quiz)` : 'İçe aktar'),
+        el('button', { class: 'btn ghost', onclick: clearImport }, 'Vazgeç'))));
+  }
+
+  async function applyImport() {
+    if (!pendingImport) return;
+    const res = await call('teacher:importQuizzes', { ...pendingImport, apply: true });
+    if (!res.ok) return;
+    toast(`${res.preview.length} quiz içe aktarıldı.`);
+    clearImport();
+  }
+
+  function clearImport() {
+    pendingImport = null;
+    $('#import-preview').replaceChildren();
+    $('#import-file').value = '';
+  }
+
+  $('#import-file').addEventListener('change', (e) => handleImportFile(e.target.files[0]));
+
+  const uploadPanel = $('#upload-panel');
+  uploadPanel.addEventListener('dragover', (e) => { e.preventDefault(); uploadPanel.classList.add('dragging'); });
+  uploadPanel.addEventListener('dragleave', () => uploadPanel.classList.remove('dragging'));
+  uploadPanel.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadPanel.classList.remove('dragging');
+    handleImportFile(e.dataTransfer.files[0]);
+  });
+
   // ------------------------------------------------------------------ sonuçlar
 
   function csvFor(r) {
@@ -328,7 +426,7 @@
 
   function download(r) {
     const blob = new Blob([csvFor(r)], { type: 'text/csv;charset=utf-8' });
-    const a = el('a', { href: URL.createObjectURL(blob), download: `${r.ders}-${r.title}-${new Date(r.startedAt).toISOString().slice(0, 10)}.csv` });
+    const a = el('a', { href: URL.createObjectURL(blob), download: fileName(r.ders, r.title, new Date(r.startedAt).toISOString().slice(0, 10)) });
     document.body.append(a);
     a.click();
     a.remove();
