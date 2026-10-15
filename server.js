@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
 const { parseQuizFile } = require('./importer');
 const { fetchSource, fetchFolder, folderIdOf, validateSource, decode } = require('./source');
+const { fetchRemote } = require('./remote');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -472,10 +473,40 @@ function createApp(opts = {}) {
     }
   }
 
-  if (quizDir && scanMs > 0) {
+  const remoteUrl = opts.remoteUrl !== undefined ? opts.remoteUrl : process.env.REMOTE_QUIZ_URL;
+  const seenRemote = new Map(); // adres -> son içe aktarılan içeriğin özeti
+  let remoteBusy = false;
+
+  async function scanRemote() {
+    if (!remoteUrl || remoteBusy) return;
+    remoteBusy = true;
+    try {
+      const files = await fetchRemote(remoteUrl);
+      for (const f of files) {
+        if (f.error) { console.error(`Uzak dosya atlandı: ${f.name}: ${f.error}`); continue; }
+        const hash = crypto.createHash('sha1').update(f.text).digest('hex');
+        if (seenRemote.get(f.url) === hash) continue;
+        try {
+          const res = await importText(f.text, f.name, true);
+          seenRemote.set(f.url, hash);
+          console.log(`Uzak adresten yüklendi: ${f.name} (${res.preview.length} quiz)`);
+        } catch (err) {
+          seenRemote.set(f.url, hash);
+          console.error(`Uzak dosya atlandı: ${f.name}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.error('Uzak klasör okunamadı:', err.message);
+    } finally {
+      remoteBusy = false;
+    }
+  }
+
+  if ((quizDir || remoteUrl) && scanMs > 0) {
     ready.then(() => {
       scanQuizDir();
-      scanTimer = setInterval(scanQuizDir, scanMs);
+      scanRemote();
+      scanTimer = setInterval(() => { scanQuizDir(); scanRemote(); }, scanMs);
       scanTimer.unref();
     });
   }
