@@ -1,13 +1,14 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
 const { parseQuizFile } = require('./importer');
-const { fetchSource, fetchFolder, folderIdOf, validateSource } = require('./source');
+const { fetchSource, fetchFolder, folderIdOf, validateSource, decode } = require('./source');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -430,6 +431,55 @@ function createApp(opts = {}) {
     return { ok: true, preview, errors: [] };
   }
 
+  // Sunucudaki quiz klasörünü tarar: yeni veya değişen dosyaları içe aktarır.
+  const quizDir = opts.quizDir !== undefined ? opts.quizDir : (process.env.QUIZ_DIR || path.join(__dirname, 'quizler'));
+  const scanMs = opts.scanMs ?? 30000;
+  const seenFiles = new Map(); // dosya -> son işlenen değişiklik zamanı
+  let scanTimer = null;
+  let scanning = false;
+
+  async function scanQuizDir() {
+    if (!quizDir || scanning) return;
+    scanning = true;
+    try {
+      let names;
+      try {
+        names = fs.readdirSync(quizDir);
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        if (!/\.(csv|json|txt)$/i.test(name) || name.startsWith('~$')) continue;
+        const file = path.join(quizDir, name);
+        let stat;
+        try {
+          stat = fs.statSync(file);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile() || seenFiles.get(name) === stat.mtimeMs) continue;
+        seenFiles.set(name, stat.mtimeMs);
+        try {
+          if (stat.size > 900 * 1024) throw new Error('dosya çok büyük (en fazla 900 KB)');
+          const res = await importText(decode(fs.readFileSync(file)), name, true);
+          console.log(`Klasörden yüklendi: ${name} (${res.preview.length} quiz)`);
+        } catch (err) {
+          console.error(`Klasör dosyası atlandı: ${name}: ${err.message}`);
+        }
+      }
+    } finally {
+      scanning = false;
+    }
+  }
+
+  if (quizDir && scanMs > 0) {
+    ready.then(() => {
+      scanQuizDir();
+      scanTimer = setInterval(scanQuizDir, scanMs);
+      scanTimer.unref();
+    });
+  }
+
   // Kayıtlı bağlantı yoksa DRIVE_URL ortam değişkeni kullanılır (diski silinen ortamlarda kalıcıdır)
   async function getSource() {
     const stored = await storage.getSetting('source');
@@ -672,6 +722,7 @@ function createApp(opts = {}) {
   });
 
   async function close() {
+    if (scanTimer) clearInterval(scanTimer);
     for (const s of sessions.values()) {
       clearPhaseTimer(s);
       if (s.overallTimer) clearTimeout(s.overallTimer);

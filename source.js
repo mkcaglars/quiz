@@ -124,4 +124,4 @@ async function fetchFolder(url, apiKey) {
   return out;
 }
 
-module.exports = { fetchSource, fetchFolder, toDownloadUrl, folderIdOf, validateSource };
+module.exports = { fetchSource, fetchFolder, toDownloadUrl, folderIdOf, validateSource, decode };
