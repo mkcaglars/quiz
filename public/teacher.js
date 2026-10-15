@@ -475,7 +475,7 @@
     if (!source || !source.lastSync) return;
     const when = new Date(source.lastSync).toLocaleString('tr-TR');
     status.textContent = source.lastResult && source.lastResult.ok
-      ? `Son güncelleme: ${when} (${source.lastResult.count} quiz)`
+      ? `Son güncelleme: ${when} (${source.lastResult.count} quiz)${source.lastResult.warn ? ` — Uyarı: ${source.lastResult.warn}` : ''}`
       : `Son deneme başarısız (${when}): ${source.lastResult ? source.lastResult.error : ''}`;
   }
 

@@ -1,13 +1,15 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
 const { parseQuizFile } = require('./importer');
-const { fetchSource, toDownloadUrl } = require('./source');
+const { fetchSource, fetchFolder, folderIdOf, validateSource, decode } = require('./source');
+const { fetchRemote } = require('./remote');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -85,7 +87,7 @@ function createApp(opts = {}) {
   // Açılışta kayıtlı bağlantı varsa quizleri otomatik güncelle (hata sunucuyu durdurmaz)
   const autoSync = opts.autoSync !== undefined ? opts.autoSync : true;
   if (autoSync) {
-    ready.then(() => storage.getSetting('source'))
+    ready.then(() => getSource())
       .then((s) => (s && s.url ? syncSource() : null))
       .then((r) => { if (r) console.log(`Drive bağlantısından ${r.count} quiz güncellendi.`); })
       .catch((err) => console.error('Drive senkronizasyonu başarısız:', err.message));
@@ -430,15 +432,120 @@ function createApp(opts = {}) {
     return { ok: true, preview, errors: [] };
   }
 
+  // Sunucudaki quiz klasörünü tarar: yeni veya değişen dosyaları içe aktarır.
+  const quizDir = opts.quizDir !== undefined ? opts.quizDir : (process.env.QUIZ_DIR || path.join(__dirname, 'quizler'));
+  const scanMs = opts.scanMs ?? 30000;
+  const seenFiles = new Map(); // dosya -> son işlenen değişiklik zamanı
+  let scanTimer = null;
+  let scanning = false;
+
+  async function scanQuizDir() {
+    if (!quizDir || scanning) return;
+    scanning = true;
+    try {
+      let names;
+      try {
+        names = fs.readdirSync(quizDir);
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        if (!/\.(csv|json|txt)$/i.test(name) || name.startsWith('~$')) continue;
+        const file = path.join(quizDir, name);
+        let stat;
+        try {
+          stat = fs.statSync(file);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile() || seenFiles.get(name) === stat.mtimeMs) continue;
+        seenFiles.set(name, stat.mtimeMs);
+        try {
+          if (stat.size > 900 * 1024) throw new Error('dosya çok büyük (en fazla 900 KB)');
+          const res = await importText(decode(fs.readFileSync(file)), name, true);
+          console.log(`Klasörden yüklendi: ${name} (${res.preview.length} quiz)`);
+        } catch (err) {
+          console.error(`Klasör dosyası atlandı: ${name}: ${err.message}`);
+        }
+      }
+    } finally {
+      scanning = false;
+    }
+  }
+
+  const remoteUrl = opts.remoteUrl !== undefined ? opts.remoteUrl : process.env.REMOTE_QUIZ_URL;
+  const seenRemote = new Map(); // adres -> son içe aktarılan içeriğin özeti
+  let remoteBusy = false;
+
+  async function scanRemote() {
+    if (!remoteUrl || remoteBusy) return;
+    remoteBusy = true;
+    try {
+      const files = await fetchRemote(remoteUrl);
+      for (const f of files) {
+        if (f.error) { console.error(`Uzak dosya atlandı: ${f.name}: ${f.error}`); continue; }
+        const hash = crypto.createHash('sha1').update(f.text).digest('hex');
+        if (seenRemote.get(f.url) === hash) continue;
+        try {
+          const res = await importText(f.text, f.name, true);
+          seenRemote.set(f.url, hash);
+          console.log(`Uzak adresten yüklendi: ${f.name} (${res.preview.length} quiz)`);
+        } catch (err) {
+          seenRemote.set(f.url, hash);
+          console.error(`Uzak dosya atlandı: ${f.name}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.error('Uzak klasör okunamadı:', err.message);
+    } finally {
+      remoteBusy = false;
+    }
+  }
+
+  if ((quizDir || remoteUrl) && scanMs > 0) {
+    ready.then(() => {
+      scanQuizDir();
+      scanRemote();
+      scanTimer = setInterval(() => { scanQuizDir(); scanRemote(); }, scanMs);
+      scanTimer.unref();
+    });
+  }
+
+  // Kayıtlı bağlantı yoksa DRIVE_URL ortam değişkeni kullanılır (diski silinen ortamlarda kalıcıdır)
+  async function getSource() {
+    const stored = await storage.getSetting('source');
+    if (stored && stored.url) return stored;
+    const envUrl = opts.driveUrl !== undefined ? opts.driveUrl : process.env.DRIVE_URL;
+    return envUrl ? { url: envUrl, lastSync: null, lastResult: null } : null;
+  }
+
   // Kayıtlı bağlantıdan dosyayı indirip içe aktarır; sonucu ayara yazar.
   async function syncSource() {
-    const source = await storage.getSetting('source');
+    const source = await getSource();
     if (!source || !source.url) throw new Error('Kayıtlı bir bağlantı yok.');
     let result;
     try {
-      const { text, filename } = await fetchSource(source.url);
-      const res = await importText(text, filename, true);
-      result = { ok: true, count: res.preview.length };
+      if (folderIdOf(source.url)) {
+        const apiKey = opts.googleApiKey !== undefined ? opts.googleApiKey : process.env.GOOGLE_API_KEY;
+        const files = await fetchFolder(source.url, apiKey);
+        if (!files.length) throw new Error('Klasörde CSV dosyası bulunamadı.');
+        let count = 0;
+        const problems = [];
+        for (const f of files) {
+          if (f.error) { problems.push(`${f.filename}: ${f.error}`); continue; }
+          try {
+            count += (await importText(f.text, f.filename, true)).preview.length;
+          } catch (err) {
+            problems.push(`${f.filename}: ${err.message}`);
+          }
+        }
+        if (!count && problems.length) throw new Error(problems.join(' | '));
+        result = { ok: true, count, warn: problems.length ? problems.join(' | ') : undefined };
+      } else {
+        const { text, filename } = await fetchSource(source.url);
+        const res = await importText(text, filename, true);
+        result = { ok: true, count: res.preview.length };
+      }
     } catch (err) {
       result = { ok: false, error: err.message };
     }
@@ -563,7 +670,7 @@ function createApp(opts = {}) {
 
     // Kayıtlı Google Drive / E-Tablolar bağlantısı
     teacherOnly('teacher:getSource', async (payload, reply) => {
-      reply({ ok: true, source: await storage.getSetting('source') });
+      reply({ ok: true, source: await getSource() });
     });
 
     teacherOnly('teacher:saveSource', async ({ url }, reply) => {
@@ -572,7 +679,7 @@ function createApp(opts = {}) {
         await storage.setSetting('source', null);
         return reply({ ok: true, source: null });
       }
-      toDownloadUrl(clean);
+      validateSource(clean);
       const source = { url: clean, lastSync: null, lastResult: null };
       await storage.setSetting('source', source);
       reply({ ok: true, source });
@@ -646,6 +753,7 @@ function createApp(opts = {}) {
   });
 
   async function close() {
+    if (scanTimer) clearInterval(scanTimer);
     for (const s of sessions.values()) {
       clearPhaseTimer(s);
       if (s.overallTimer) clearTimeout(s.overallTimer);
@@ -667,6 +775,7 @@ if (require.main === module) {
     console.log(`Öğretmen paneli:        http://localhost:${port}/ogretmen`);
     console.log(`Öğrenci bağlantısı:     http://localhost:${port}/?isim=Ali&ders=Matematik`);
     if (!process.env.TEACHER_PASSWORD) console.log('Uyarı: TEACHER_PASSWORD ayarlanmadı, varsayılan şifre "ogretmen123".');
+    if (storage.kind !== 'postgres' && !process.env.DRIVE_URL) console.log('Uyarı: DATABASE_URL ve DRIVE_URL yok; yeniden başlatmada kayıtlı bağlantı ve quizler silinebilir.');
   })).catch((err) => {
     console.error('Kayıt sistemi başlatılamadı (DATABASE_URL doğru mu?):', err.message);
     process.exit(1);
