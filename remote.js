@@ -13,9 +13,14 @@ const MAX_FILES = 30;
 const FILE_RE = /\.(csv|json|txt)$/i;
 
 async function get(url) {
+  const headers = {
+    'user-agent': 'Mozilla/5.0 (compatible; QuizSync/1.0)',
+    accept: 'text/csv,text/html,application/json;q=0.9,*/*;q=0.8',
+  };
+  if (process.env.REMOTE_QUIZ_TOKEN) headers['x-quiz-token'] = process.env.REMOTE_QUIZ_TOKEN;
   let res;
   try {
-    res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    res = await fetch(url, { redirect: 'follow', headers, signal: AbortSignal.timeout(15000) });
   } catch {
     throw new Error('adrese ulaşılamadı');
   }
