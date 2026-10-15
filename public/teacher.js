@@ -29,6 +29,7 @@
       sessionStorage.setItem('teacherPw', password);
       loggedIn = true;
       quizzes = res.quizzes;
+      loadSource();
       results = res.results;
       $('#s-login').classList.add('hidden');
       $('#main').classList.remove('hidden');
@@ -466,6 +467,38 @@
   }
 
   $('#import-file').addEventListener('change', (e) => handleImportFile(e.target.files[0]));
+
+  // Kayıtlı Drive bağlantısı
+  function showSource(source) {
+    $('#source-url').value = source ? source.url : '';
+    const status = $('#source-status');
+    if (!source || !source.lastSync) return;
+    const when = new Date(source.lastSync).toLocaleString('tr-TR');
+    status.textContent = source.lastResult && source.lastResult.ok
+      ? `Son güncelleme: ${when} (${source.lastResult.count} quiz)`
+      : `Son deneme başarısız (${when}): ${source.lastResult ? source.lastResult.error : ''}`;
+  }
+
+  async function loadSource() {
+    const res = await call('teacher:getSource', {});
+    if (res.ok) showSource(res.source);
+  }
+
+  async function syncSource() {
+    const res = await call('teacher:syncSource', {});
+    if (!res.ok) return loadSource();
+    showSource(res.source);
+    toast(`${res.count} quiz güncellendi.`);
+  }
+
+  $('#source-save').addEventListener('click', async () => {
+    const res = await call('teacher:saveSource', { url: $('#source-url').value });
+    if (!res.ok) return;
+    if (!res.source) { toast('Bağlantı silindi.'); return showSource(null); }
+    showSource(res.source);
+    await syncSource();
+  });
+  $('#source-sync').addEventListener('click', syncSource);
 
   const uploadPanel = $('#upload-panel');
   uploadPanel.addEventListener('dragover', (e) => { e.preventDefault(); uploadPanel.classList.add('dragging'); });

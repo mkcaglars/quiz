@@ -51,6 +51,12 @@
             <label class="btn green" style="margin:0">⬆ Dosya seç<input type="file" id="import-file" accept=".csv,.json,.txt,text/csv,application/json" hidden></label>
             <span class="muted">veya dosyayı bu kutuya sürükleyin</span>
           </div>
+          <div class="row" style="margin-top:14px">
+            <input type="url" id="source-url" placeholder="Google Drive / E-Tablolar paylaşım bağlantısı" style="flex:1;min-width:220px">
+            <button class="btn blue" id="source-save">Kaydet ve güncelle</button>
+            <button class="btn ghost" id="source-sync">↻ Şimdi güncelle</button>
+          </div>
+          <p class="muted" id="source-status" style="margin:6px 0 0">Bağlantı kaydedilirse uygulama her açıldığında quizler otomatik güncellenir. Dosyanın paylaşımı "Bağlantıya sahip herkes görüntüleyebilir" olmalı.</p>
           <details style="margin-top:12px">
             <summary><strong>Şablon nasıl doldurulur?</strong></summary>
             <ul class="help">

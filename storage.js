@@ -28,6 +28,7 @@ function createFileStorage(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const quizzesFile = path.join(dataDir, 'quizzes.json');
   const resultsFile = path.join(dataDir, 'results.json');
+  const settingsFile = path.join(dataDir, 'settings.json');
   let quizzes = [];
   let results = [];
 
@@ -65,6 +66,15 @@ function createFileStorage(dataDir) {
       results = results.filter((x) => x.id !== id);
       writeJson(resultsFile, results);
     },
+    async getSetting(key) {
+      const s = readJson(settingsFile, {});
+      return s && s[key] !== undefined ? s[key] : null;
+    },
+    async setSetting(key, value) {
+      const s = readJson(settingsFile, {});
+      s[key] = value;
+      writeJson(settingsFile, s);
+    },
     async close() {},
   };
 }
@@ -99,6 +109,10 @@ function createPgStorage(databaseUrl, dataDir) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS results_started_at_idx ON results (started_at DESC);
+        CREATE TABLE IF NOT EXISTS settings (
+          key  TEXT PRIMARY KEY,
+          data JSONB NOT NULL
+        );
       `);
 
       // İlk kurulumda: data/ klasöründe eski JSON kayıtlar varsa aktar, yoksa örnek quiz ekle
@@ -140,6 +154,16 @@ function createPgStorage(databaseUrl, dataDir) {
     },
     async deleteResult(id) {
       await pool.query('DELETE FROM results WHERE id = $1', [id]);
+    },
+    async getSetting(key) {
+      const { rows } = await pool.query('SELECT data FROM settings WHERE key = $1', [key]);
+      return rows.length ? rows[0].data : null;
+    },
+    async setSetting(key, value) {
+      await pool.query(
+        'INSERT INTO settings (key, data) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data',
+        [key, JSON.stringify(value)],
+      );
     },
     async close() {
       await pool.end();

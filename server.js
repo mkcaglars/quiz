@@ -7,6 +7,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
 const { parseQuizFile } = require('./importer');
+const { fetchSource, toDownloadUrl } = require('./source');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -80,6 +81,15 @@ function createApp(opts = {}) {
     .init([{ id: newId(), createdAt: Date.now(), ...SAMPLE_QUIZ }])
     .then(() => storage.loadQuizzes())
     .then((list) => { quizzes = list; });
+
+  // Açılışta kayıtlı bağlantı varsa quizleri otomatik güncelle (hata sunucuyu durdurmaz)
+  const autoSync = opts.autoSync !== undefined ? opts.autoSync : true;
+  if (autoSync) {
+    ready.then(() => storage.getSetting('source'))
+      .then((s) => (s && s.url ? syncSource() : null))
+      .then((r) => { if (r) console.log(`Drive bağlantısından ${r.count} quiz güncellendi.`); })
+      .catch((err) => console.error('Drive senkronizasyonu başarısız:', err.message));
+  }
 
   const app = express();
   app.use(express.static(path.join(__dirname, 'public')));
@@ -371,6 +381,73 @@ function createApp(opts = {}) {
     }
   }
 
+  // --- Dosyadan quiz yükleme -------------------------------------------------
+
+  function broadcastQuizzes(affectedDers) {
+    io.to('teachers').emit('teacher:quizzes', quizzes);
+    for (const d of new Set(affectedDers.map(normalize))) pushQuizList(d);
+  }
+
+  // apply=false ise sadece önizleme döner, hiçbir şey kaydedilmez.
+  // Aynı ders + başlıkta quiz varsa güncellenir, yoksa yeni quiz eklenir.
+  async function importText(text, filename, apply) {
+    if (typeof text !== 'string') throw new Error('Dosya okunamadı.');
+    const parsed = parseQuizFile(text, filename);
+    const errors = [...parsed.errors];
+    const items = [];
+    parsed.quizzes.forEach((raw, i) => {
+      try {
+        const data = sanitizeQuiz(raw);
+        const existing = quizzes.find((q) => normalize(q.ders) === normalize(data.ders) && normalize(q.title) === normalize(data.title));
+        items.push({ data, existing });
+      } catch (err) {
+        errors.push(`${raw.title ? `"${raw.title}"` : `${i + 1}. quiz`}: ${err.message}`);
+      }
+    });
+    const preview = items.map(({ data, existing }) => ({
+      title: data.title,
+      ders: data.ders,
+      questionCount: data.questions.length,
+      durationMin: data.durationMin,
+      action: existing ? 'update' : 'new',
+    }));
+    if (!apply) return { ok: true, preview, errors };
+    if (errors.length) throw new Error('Dosyada hatalar var; önce düzeltin.');
+    if (!items.length) throw new Error('Dosyada quiz bulunamadı.');
+
+    const affected = [];
+    for (const { data, existing } of items) {
+      const quiz = existing
+        ? { ...existing, ...data, updatedAt: Date.now() }
+        : { id: newId(), createdAt: Date.now(), ...data };
+      await storage.saveQuiz(quiz);
+      const idx = quizzes.findIndex((q) => q.id === quiz.id);
+      if (idx === -1) quizzes.push(quiz);
+      else quizzes[idx] = quiz;
+      affected.push(quiz.ders);
+    }
+    broadcastQuizzes(affected);
+    return { ok: true, preview, errors: [] };
+  }
+
+  // Kayıtlı bağlantıdan dosyayı indirip içe aktarır; sonucu ayara yazar.
+  async function syncSource() {
+    const source = await storage.getSetting('source');
+    if (!source || !source.url) throw new Error('Kayıtlı bir bağlantı yok.');
+    let result;
+    try {
+      const { text, filename } = await fetchSource(source.url);
+      const res = await importText(text, filename, true);
+      result = { ok: true, count: res.preview.length };
+    } catch (err) {
+      result = { ok: false, error: err.message };
+    }
+    const updated = { ...source, lastSync: Date.now(), lastResult: result };
+    await storage.setSetting('source', updated);
+    if (!result.ok) throw new Error(result.error);
+    return { source: updated, count: result.count };
+  }
+
   // --- Socket olayları -----------------------------------------------------
 
   io.on('connection', (socket) => {
@@ -458,11 +535,6 @@ function createApp(opts = {}) {
       });
     };
 
-    const broadcastQuizzes = (affectedDers) => {
-      io.to('teachers').emit('teacher:quizzes', quizzes);
-      for (const d of new Set(affectedDers.map(normalize))) pushQuizList(d);
-    };
-
     teacherOnly('teacher:saveQuiz', async (payload, reply) => {
       const data = sanitizeQuiz(payload);
       let quiz;
@@ -486,43 +558,29 @@ function createApp(opts = {}) {
     // Dosyadan quiz yükleme. apply=false ise sadece önizleme döner, hiçbir şey kaydedilmez.
     // Aynı ders + başlıkta quiz varsa güncellenir, yoksa yeni quiz eklenir.
     teacherOnly('teacher:importQuizzes', async ({ text, filename, apply }, reply) => {
-      if (typeof text !== 'string') throw new Error('Dosya okunamadı.');
-      const parsed = parseQuizFile(text, filename);
-      const errors = [...parsed.errors];
-      const items = [];
-      parsed.quizzes.forEach((raw, i) => {
-        try {
-          const data = sanitizeQuiz(raw);
-          const existing = quizzes.find((q) => normalize(q.ders) === normalize(data.ders) && normalize(q.title) === normalize(data.title));
-          items.push({ data, existing });
-        } catch (err) {
-          errors.push(`${raw.title ? `"${raw.title}"` : `${i + 1}. quiz`}: ${err.message}`);
-        }
-      });
-      const preview = items.map(({ data, existing }) => ({
-        title: data.title,
-        ders: data.ders,
-        questionCount: data.questions.length,
-        durationMin: data.durationMin,
-        action: existing ? 'update' : 'new',
-      }));
-      if (!apply) return reply({ ok: true, preview, errors });
-      if (errors.length) throw new Error('Dosyada hatalar var; önce düzeltin.');
-      if (!items.length) throw new Error('Dosyada quiz bulunamadı.');
+      reply(await importText(text, filename, apply));
+    });
 
-      const affected = [];
-      for (const { data, existing } of items) {
-        const quiz = existing
-          ? { ...existing, ...data, updatedAt: Date.now() }
-          : { id: newId(), createdAt: Date.now(), ...data };
-        await storage.saveQuiz(quiz);
-        const idx = quizzes.findIndex((q) => q.id === quiz.id);
-        if (idx === -1) quizzes.push(quiz);
-        else quizzes[idx] = quiz;
-        affected.push(quiz.ders);
+    // Kayıtlı Google Drive / E-Tablolar bağlantısı
+    teacherOnly('teacher:getSource', async (payload, reply) => {
+      reply({ ok: true, source: await storage.getSetting('source') });
+    });
+
+    teacherOnly('teacher:saveSource', async ({ url }, reply) => {
+      const clean = String(url || '').trim();
+      if (!clean) {
+        await storage.setSetting('source', null);
+        return reply({ ok: true, source: null });
       }
-      broadcastQuizzes(affected);
-      reply({ ok: true, preview, errors: [] });
+      toDownloadUrl(clean);
+      const source = { url: clean, lastSync: null, lastResult: null };
+      await storage.setSetting('source', source);
+      reply({ ok: true, source });
+    });
+
+    teacherOnly('teacher:syncSource', async (payload, reply) => {
+      const result = await syncSource();
+      reply({ ok: true, ...result });
     });
 
     teacherOnly('teacher:deleteQuiz', async ({ id }, reply) => {
