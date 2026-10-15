@@ -85,7 +85,7 @@ function createApp(opts = {}) {
   // Açılışta kayıtlı bağlantı varsa quizleri otomatik güncelle (hata sunucuyu durdurmaz)
   const autoSync = opts.autoSync !== undefined ? opts.autoSync : true;
   if (autoSync) {
-    ready.then(() => storage.getSetting('source'))
+    ready.then(() => getSource())
       .then((s) => (s && s.url ? syncSource() : null))
       .then((r) => { if (r) console.log(`Drive bağlantısından ${r.count} quiz güncellendi.`); })
       .catch((err) => console.error('Drive senkronizasyonu başarısız:', err.message));
@@ -430,9 +430,17 @@ function createApp(opts = {}) {
     return { ok: true, preview, errors: [] };
   }
 
+  // Kayıtlı bağlantı yoksa DRIVE_URL ortam değişkeni kullanılır (diski silinen ortamlarda kalıcıdır)
+  async function getSource() {
+    const stored = await storage.getSetting('source');
+    if (stored && stored.url) return stored;
+    const envUrl = opts.driveUrl !== undefined ? opts.driveUrl : process.env.DRIVE_URL;
+    return envUrl ? { url: envUrl, lastSync: null, lastResult: null } : null;
+  }
+
   // Kayıtlı bağlantıdan dosyayı indirip içe aktarır; sonucu ayara yazar.
   async function syncSource() {
-    const source = await storage.getSetting('source');
+    const source = await getSource();
     if (!source || !source.url) throw new Error('Kayıtlı bir bağlantı yok.');
     let result;
     try {
@@ -563,7 +571,7 @@ function createApp(opts = {}) {
 
     // Kayıtlı Google Drive / E-Tablolar bağlantısı
     teacherOnly('teacher:getSource', async (payload, reply) => {
-      reply({ ok: true, source: await storage.getSetting('source') });
+      reply({ ok: true, source: await getSource() });
     });
 
     teacherOnly('teacher:saveSource', async ({ url }, reply) => {
@@ -667,6 +675,7 @@ if (require.main === module) {
     console.log(`Öğretmen paneli:        http://localhost:${port}/ogretmen`);
     console.log(`Öğrenci bağlantısı:     http://localhost:${port}/?isim=Ali&ders=Matematik`);
     if (!process.env.TEACHER_PASSWORD) console.log('Uyarı: TEACHER_PASSWORD ayarlanmadı, varsayılan şifre "ogretmen123".');
+    if (storage.kind !== 'postgres' && !process.env.DRIVE_URL) console.log('Uyarı: DATABASE_URL ve DRIVE_URL yok; yeniden başlatmada kayıtlı bağlantı ve quizler silinebilir.');
   })).catch((err) => {
     console.error('Kayıt sistemi başlatılamadı (DATABASE_URL doğru mu?):', err.message);
     process.exit(1);
