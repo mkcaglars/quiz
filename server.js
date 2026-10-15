@@ -7,7 +7,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { createStorage } = require('./storage');
 const { parseQuizFile } = require('./importer');
-const { fetchSource, toDownloadUrl } = require('./source');
+const { fetchSource, fetchFolder, folderIdOf, validateSource } = require('./source');
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
@@ -444,9 +444,27 @@ function createApp(opts = {}) {
     if (!source || !source.url) throw new Error('Kayıtlı bir bağlantı yok.');
     let result;
     try {
-      const { text, filename } = await fetchSource(source.url);
-      const res = await importText(text, filename, true);
-      result = { ok: true, count: res.preview.length };
+      if (folderIdOf(source.url)) {
+        const apiKey = opts.googleApiKey !== undefined ? opts.googleApiKey : process.env.GOOGLE_API_KEY;
+        const files = await fetchFolder(source.url, apiKey);
+        if (!files.length) throw new Error('Klasörde CSV dosyası bulunamadı.');
+        let count = 0;
+        const problems = [];
+        for (const f of files) {
+          if (f.error) { problems.push(`${f.filename}: ${f.error}`); continue; }
+          try {
+            count += (await importText(f.text, f.filename, true)).preview.length;
+          } catch (err) {
+            problems.push(`${f.filename}: ${err.message}`);
+          }
+        }
+        if (!count && problems.length) throw new Error(problems.join(' | '));
+        result = { ok: true, count, warn: problems.length ? problems.join(' | ') : undefined };
+      } else {
+        const { text, filename } = await fetchSource(source.url);
+        const res = await importText(text, filename, true);
+        result = { ok: true, count: res.preview.length };
+      }
     } catch (err) {
       result = { ok: false, error: err.message };
     }
@@ -580,7 +598,7 @@ function createApp(opts = {}) {
         await storage.setSetting('source', null);
         return reply({ ok: true, source: null });
       }
-      toDownloadUrl(clean);
+      validateSource(clean);
       const source = { url: clean, lastSync: null, lastResult: null };
       await storage.setSetting('source', source);
       reply({ ok: true, source });

@@ -22,6 +22,13 @@ test('E-Tablolar bağlantısı CSV dışa aktarımına çevrilir', () => {
   );
 });
 
+test('Klasör bağlantısından kimlik çıkarılır', () => {
+  const { folderIdOf, validateSource } = require('../source');
+  assert.strictEqual(folderIdOf('https://drive.google.com/drive/folders/F_1-x?usp=sharing'), 'F_1-x');
+  assert.strictEqual(folderIdOf('https://example.com/drive/folders/abc'), null);
+  assert.strictEqual(validateSource('https://drive.google.com/drive/folders/abc'), 'folder');
+});
+
 test('Google dışı veya https olmayan adresler reddedilir', () => {
   assert.throws(() => toDownloadUrl('https://example.com/a.csv'));
   assert.throws(() => toDownloadUrl('http://drive.google.com/file/d/x/view'));
